@@ -105,11 +105,12 @@ def test_get_var_type_int(flopy_dis_mf6):
 
 def test_get_var_string(flopy_dis_mf6):
     flopy_dis, mf6 = flopy_dis_mf6
-    mf6.initialize(requested_extensions=["xmi"])
+    mf6.initialize(requested_extensions=["xmi", "bmi:pointers"])
     xmi = mf6.get_extension("xmi")
+    ptrs = mf6.get_extension("bmi:pointers")
 
     name_tag = xmi.get_var_address("NAME", flopy_dis.model_name)
-    assert mf6.get_var_rank(name_tag) == 0
+    assert ptrs.get_var_rank(name_tag) == 0
     assert mf6.get_var_type(name_tag) == "STRING LEN=16"
     assert mf6.get_value(name_tag).tolist() == ["TEST_MODEL_DIS"]
 
@@ -129,16 +130,17 @@ def test_set_var_string(flopy_dis_mf6):
 
 def test_get_var_stringarray(flopy_dis_mf6):
     flopy_dis, mf6 = flopy_dis_mf6
-    mf6.initialize(requested_extensions=["xmi"])
+    mf6.initialize(requested_extensions=["xmi", "bmi:pointers"])
     xmi = mf6.get_extension("xmi")
+    ptrs = mf6.get_extension("bmi:pointers")
 
     # boundary names are not set until _rp, so we need this update()
     mf6.update()
 
     # test var with rank 1 and shape [0]
     name_tag = xmi.get_var_address("AUXNAME_CST", flopy_dis.model_name, "CHD_0")
-    assert mf6.get_var_rank(name_tag) == 1
-    assert mf6.get_var_shape(name_tag) == [0]
+    assert ptrs.get_var_rank(name_tag) == 1
+    assert ptrs.get_var_shape(name_tag) == [0]
     assert mf6.get_var_nbytes(name_tag) == 0
     assert mf6.get_var_type(name_tag) == "STRING LEN=16 (0)"
     assert mf6.get_value(name_tag).tolist() == []
@@ -148,15 +150,16 @@ def test_get_value_ptr_modelname(flopy_dis_mf6):
     """`flopy_dis` sets constant head values.
     This test checks if these can be properly extracted with origin=modelname."""
     flopy_dis, mf6 = flopy_dis_mf6
-    mf6.initialize(requested_extensions=["xmi"])
+    mf6.initialize(requested_extensions=["xmi", "bmi:pointers"])
     xmi = mf6.get_extension("xmi")
+    ptrs = mf6.get_extension("bmi:pointers")
 
     stress_period_data = flopy_dis.stress_period_data
     shape = flopy_dis.nlay, flopy_dis.nrow, flopy_dis.ncol
 
     mf6.update()
     head_tag = xmi.get_var_address("X", flopy_dis.model_name)
-    actual_head = mf6.get_value_ptr(head_tag)
+    actual_head = ptrs.get_value_ptr(head_tag)
 
     for cell_id, presciped_head, _ in stress_period_data:
         head_index = np.ravel_multi_index(cell_id, shape)
@@ -165,12 +168,13 @@ def test_get_value_ptr_modelname(flopy_dis_mf6):
 
 def test_get_value_ptr_scalar(flopy_dis_mf6):
     flopy_dis, mf6 = flopy_dis_mf6
-    mf6.initialize(requested_extensions=["xmi"])
+    mf6.initialize(requested_extensions=["xmi", "bmi:pointers"])
     xmi = mf6.get_extension("xmi")
+    ptrs = mf6.get_extension("bmi:pointers")
 
     mf6.update()
     id_tag = xmi.get_var_address("ID", flopy_dis.model_name)
-    grid_id = mf6.get_value_ptr_scalar(id_tag)
+    grid_id = ptrs.get_value_ptr_scalar(id_tag)
 
     # Only one model is defined => id should be 1
     # grid_id[0], because even scalars are defined as arrays
@@ -179,15 +183,16 @@ def test_get_value_ptr_scalar(flopy_dis_mf6):
 
 def test_get_var_grid(flopy_dis_mf6):
     flopy_dis, mf6 = flopy_dis_mf6
-    mf6.initialize(requested_extensions=["xmi"])
+    mf6.initialize(requested_extensions=["xmi", "bmi:pointers"])
     xmi = mf6.get_extension("xmi")
+    ptrs = mf6.get_extension("bmi:pointers")
 
     # Getting the grid id from the model, requires specifying one variable
     k11_tag = xmi.get_var_address("K11", flopy_dis.model_name, "NPF")
     prescribed_grid_id = mf6.get_var_grid(k11_tag)
 
     id_tag = xmi.get_var_address("ID", flopy_dis.model_name)
-    assert mf6.get_value_ptr(id_tag) == [prescribed_grid_id]
+    assert ptrs.get_value_ptr(id_tag) == [prescribed_grid_id]
 
 
 def test_get_grid_type(flopy_dis_mf6):
@@ -261,7 +266,8 @@ def test_get_time_units(flopy_dis_mf6):
 
 def test_get_value_double(flopy_dis_mf6):
     mf6 = flopy_dis_mf6[1]
-    mf6.initialize()
+    mf6.initialize(requested_extensions=["bmi:pointers"])
+    ptrs = mf6.get_extension("bmi:pointers")
 
     some_output_var = next(
         var for var in mf6.get_varset_members("output") if var.endswith("/X")
@@ -270,31 +276,33 @@ def test_get_value_double(flopy_dis_mf6):
     # compare to array in MODFLOW memory:
     np.testing.assert_array_equal(
         mf6.get_value(some_output_var),
-        mf6.get_value_ptr(some_output_var),
+        ptrs.get_value_ptr(some_output_var),
     )
 
 
 def test_get_value_double_inplace(flopy_dis_mf6):
     mf6 = flopy_dis_mf6[1]
-    mf6.initialize()
+    mf6.initialize(requested_extensions=["bmi:pointers"])
+    ptrs = mf6.get_extension("bmi:pointers")
 
     some_output_var = next(
         var for var in mf6.get_varset_members("output") if var.endswith("/X")
     )
-    copy_arr = mf6.get_value_ptr(some_output_var).copy()
+    copy_arr = ptrs.get_value_ptr(some_output_var).copy()
     copy_arr[:] = -99999.0
     mf6.get_value(some_output_var, copy_arr)
 
     # compare to array in MODFLOW memory:
     np.testing.assert_array_equal(
         copy_arr,
-        mf6.get_value_ptr(some_output_var),
+        ptrs.get_value_ptr(some_output_var),
     )
 
 
 def test_get_value_int(flopy_dis_idomain_mf6):
     mf6 = flopy_dis_idomain_mf6[1]
-    mf6.initialize()
+    mf6.initialize(requested_extensions=["bmi:pointers"])
+    ptrs = mf6.get_extension("bmi:pointers")
 
     nodes_reduced_tag = next(
         var for var in mf6.get_varset_members("output") if var.endswith("/NODEREDUCED")
@@ -303,24 +311,25 @@ def test_get_value_int(flopy_dis_idomain_mf6):
     # compare to array in MODFLOW memory:
     np.testing.assert_array_equal(
         mf6.get_value(nodes_reduced_tag),
-        mf6.get_value_ptr(nodes_reduced_tag),
+        ptrs.get_value_ptr(nodes_reduced_tag),
     )
 
 
 def test_get_value_int_scalar(flopy_dis_idomain_mf6):
     mf6 = flopy_dis_idomain_mf6[1]
-    mf6.initialize()
+    mf6.initialize(requested_extensions=["bmi:pointers"])
+    ptrs = mf6.get_extension("bmi:pointers")
 
     # get scalar variable:
     id_tag = next(
         var for var in mf6.get_varset_members("output") if var.endswith("/NROW")
     )
-    assert mf6.get_var_rank(id_tag) == 0
+    assert ptrs.get_var_rank(id_tag) == 0
 
     # compare with value in MODFLOW memory:
     np.testing.assert_array_equal(
         mf6.get_value(id_tag),
-        mf6.get_value_ptr(id_tag),
+        ptrs.get_value_ptr(id_tag),
     )
 
 
@@ -335,12 +344,13 @@ def test_get_value_at_indices(flopy_dis_idomain_mf6):
 
 def test_set_value(flopy_dis_mf6):
     flopy_dis, mf6 = flopy_dis_mf6
-    mf6.initialize(requested_extensions=["xmi"])
+    mf6.initialize(requested_extensions=["xmi", "bmi:pointers"])
     xmi = mf6.get_extension("xmi")
+    ptrs = mf6.get_extension("bmi:pointers")
 
     # 1D double array
     head_tag = xmi.get_var_address("X", flopy_dis.model_name)
-    orig_head = mf6.get_value_ptr(head_tag)
+    orig_head = ptrs.get_value_ptr(head_tag)
     new_head = 2.0 * orig_head
     mf6.set_value(head_tag, new_head)
     np.testing.assert_array_equal(orig_head, new_head)

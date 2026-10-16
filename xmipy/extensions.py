@@ -18,7 +18,11 @@ from ctypes import (
 )
 from typing import TYPE_CHECKING, Any
 
-from xmipy.errors import XMIError
+import numpy as np
+from bmipy import BmiPointers
+from numpy.typing import NDArray
+
+from xmipy.errors import InputError, XMIError
 from xmipy.utils import cd
 from xmipy.xmi import Xmi
 
@@ -49,6 +53,24 @@ class XmiTable(Structure):
 
 
 XMI_TABLE_VERSION = 1
+
+
+class PointersTable(Structure):
+    """Function table for the ``"bmi:pointers"`` extension."""
+
+    _fields_ = [
+        ("version", c_int),
+        ("nfunctions", c_int),
+        ("get_value_ptr", CFUNCTYPE(_status, _ptr, _ptr)),
+        ("get_value_ptr_double", CFUNCTYPE(_status, _ptr, _ptr)),
+        ("get_value_ptr_int", CFUNCTYPE(_status, _ptr, _ptr)),
+        ("get_value_ptr_bool", CFUNCTYPE(_status, _ptr, _ptr)),
+        ("get_var_rank", CFUNCTYPE(_status, _ptr, _ptr)),
+        ("get_var_shape", CFUNCTYPE(_status, _ptr, _ptr)),
+    ]
+
+
+POINTERS_TABLE_VERSION = 1
 
 
 def table_from_pointer(table_ptr: c_void_p, table_type: Any, version: int) -> Any:
@@ -125,3 +147,68 @@ class XmiExtension(Xmi):
             byref(var_address),
         )
         return var_address.value.decode()
+
+
+class PointersExtension(BmiPointers):
+    """The ``"bmi:pointers"`` extension of a library wrapped by `XmiWrapper`.
+
+    A pointer to a variable in ``"bmi:pointers:transient"`` must be fetched
+    again after any call that changes the model state.
+    """
+
+    def __init__(self, wrapper: "XmiWrapper", table: PointersTable):
+        self._wrapper = wrapper
+        self._table = table
+
+    def _call(self, name: str, *args: Any, **kwargs: Any) -> None:
+        self._wrapper._execute_function(
+            getattr(self._table, name), *args, name=name, **kwargs
+        )
+
+    def get_var_rank(self, name: str) -> int:
+        rank = c_int(0)
+        self._call("get_var_rank", c_char_p(name.encode()), byref(rank))
+        return rank.value
+
+    def get_var_shape(self, name: str) -> NDArray[np.int32]:
+        rank = self.get_var_rank(name)
+        array = np.zeros(rank, dtype=np.int32)
+        self._call(
+            "get_var_shape", c_char_p(name.encode()), c_void_p(array.ctypes.data)
+        )
+        return array
+
+    def get_value_ptr(self, name: str) -> NDArray[Any]:
+        # first scalars
+        rank = self.get_var_rank(name)
+        if rank == 0:
+            return self.get_value_ptr_scalar(name)
+
+        shape_tuple = tuple(np.trim_zeros(self.get_var_shape(name)))
+        return self._pointer(name, len(shape_tuple), shape_tuple)
+
+    def get_value_ptr_scalar(self, name: str) -> NDArray[Any]:
+        return self._pointer(name, 1, (1,))
+
+    def _pointer(self, name: str, ndim: int, shape: Any) -> NDArray[Any]:
+        var_type = self._wrapper.get_var_type(name)
+        var_type_lower = var_type.lower()
+        if var_type_lower.startswith("double"):
+            dtype: Any = np.float64
+        elif var_type_lower.startswith("float"):
+            dtype = np.float32
+        elif var_type_lower.startswith("int"):
+            dtype = np.int32
+        else:
+            raise InputError(f"Unsupported value type {var_type!r}")
+        arraytype = np.ctypeslib.ndpointer(
+            dtype=dtype, ndim=ndim, shape=shape, flags="C"
+        )
+        values = arraytype()
+        self._call(
+            "get_value_ptr",
+            c_char_p(name.encode()),
+            byref(values),
+            detail="for variable " + name,
+        )
+        return values.contents  # type: ignore[no-any-return]

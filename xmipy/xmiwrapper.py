@@ -23,7 +23,10 @@ from numpy.typing import NDArray
 
 from xmipy.errors import InputError, TimerError, XMIError
 from xmipy.extensions import (
+    POINTERS_TABLE_VERSION,
     XMI_TABLE_VERSION,
+    PointersExtension,
+    PointersTable,
     XmiExtension,
     XmiTable,
     table_from_pointer,
@@ -259,6 +262,11 @@ class XmiWrapper(Bmi):
             if extension_name == "xmi":
                 table = table_from_pointer(table_ptr, XmiTable, XMI_TABLE_VERSION)
                 self._extensions[extension_name] = XmiExtension(self, table)
+            elif extension_name == "bmi:pointers":
+                table = table_from_pointer(
+                    table_ptr, PointersTable, POINTERS_TABLE_VERSION
+                )
+                self._extensions[extension_name] = PointersExtension(self, table)
             else:
                 raise InputError(f"xmipy does not support {extension_name!r}")
         return self._extensions[extension_name]
@@ -355,26 +363,6 @@ class XmiWrapper(Bmi):
         )
         return var_type.value.decode()
 
-    # strictly speaking not BMI...
-    def get_var_shape(self, name: str) -> NDArray[np.int32]:
-        rank = self.get_var_rank(name)
-        array = np.zeros(rank, dtype=np.int32)
-        self._execute_function(
-            self.lib.get_var_shape,
-            c_char_p(name.encode()),
-            c_void_p(array.ctypes.data),
-        )
-        return array
-
-    def get_var_rank(self, name: str) -> int:
-        rank = c_int(0)
-        self._execute_function(
-            self.lib.get_var_rank,
-            c_char_p(name.encode()),
-            byref(rank),
-        )
-        return rank.value
-
     def get_var_units(self, name: str) -> str:
         raise NotImplementedError
 
@@ -405,41 +393,24 @@ class XmiWrapper(Bmi):
     def get_value(
         self, name: str, dest: Union[NDArray[Any], None] = None
     ) -> NDArray[Any]:
+        """Get a flattened copy of the variable.
+
+        The size comes from get_var_nbytes and get_var_itemsize, so no pointer
+        or shape query is needed.
+        """
         # make sure that optional array is of correct layout:
         if dest is not None and not dest.flags["C"]:
             raise InputError("Array should have C layout")
 
-        # first deal with scalars
-        rank = self.get_var_rank(name)
         var_type = self.get_var_type(name)
         var_type_lower = var_type.lower()
-
-        if rank == 0:
-            if var_type_lower.startswith("string"):
-                ilen = self.get_var_nbytes(name)
-                strtype = "<S" + str(ilen + 1)
-                if dest is None:
-                    dest = np.empty(1, dtype=strtype, order="C")
-                self._execute_function(
-                    self.lib.get_value,
-                    c_char_p(name.encode()),
-                    byref(dest.ctypes.data_as(POINTER(c_char))),
-                )
-                dest[0] = dest[0].decode("ascii").strip()
-                return dest.astype(str)
-            else:
-                src = self.get_value_ptr_scalar(name)
-                if dest is None:
-                    return self.get_value_ptr_scalar(name).copy()
-                else:
-                    dest[0] = src[0]
-                    return dest
-
-        var_shape = self.get_var_shape(name)
+        nbytes = self.get_var_nbytes(name)
+        itemsize = self.get_var_itemsize(name)
+        count = nbytes // itemsize if itemsize > 0 else 0
 
         if var_type_lower.startswith("double"):
             if dest is None:
-                dest = np.empty(shape=var_shape, dtype=np.float64, order="C")
+                dest = np.empty(count, dtype=np.float64, order="C")
             self._execute_function(
                 self.lib.get_value,
                 c_char_p(name.encode()),
@@ -447,19 +418,18 @@ class XmiWrapper(Bmi):
             )
         elif var_type_lower.startswith("int"):
             if dest is None:
-                dest = np.empty(shape=var_shape, dtype=np.int32, order="C")
+                dest = np.empty(count, dtype=np.int32, order="C")
             self._execute_function(
                 self.lib.get_value,
                 c_char_p(name.encode()),
                 byref(dest.ctypes.data_as(POINTER(c_int))),
             )
         elif var_type_lower.startswith("string"):
+            if count == 0:
+                return np.empty((0,), "U1")
             if dest is None:
-                if var_shape[0] == 0:
-                    return np.empty((0,), "U1")
-                ilen = self.get_var_nbytes(name) // var_shape[0]
-                strtype = "<S" + str(ilen + 1)
-                dest = np.empty(var_shape[0], dtype=strtype, order="C")
+                # strings are copied with a terminating character each
+                dest = np.empty(count, dtype="<S" + str(itemsize + 1), order="C")
             self._execute_function(
                 self.lib.get_value,
                 c_char_p(name.encode()),
@@ -472,69 +442,6 @@ class XmiWrapper(Bmi):
             raise InputError(f"Unsupported value type {var_type!r}")
 
         return dest
-
-    def get_value_ptr(self, name: str) -> NDArray[Any]:
-        # first scalars
-        rank = self.get_var_rank(name)
-        if rank == 0:
-            return self.get_value_ptr_scalar(name)
-
-        var_type = self.get_var_type(name)
-        var_type_lower = var_type.lower()
-        shape_array = self.get_var_shape(name)
-
-        # convert shape array to python tuple
-        shape_tuple = tuple(np.trim_zeros(shape_array))
-        ndim = len(shape_tuple)
-
-        if var_type_lower.startswith("double"):
-            arraytype = np.ctypeslib.ndpointer(
-                dtype=np.float64, ndim=ndim, shape=shape_tuple, flags="C"
-            )
-        elif var_type_lower.startswith("float"):
-            arraytype = np.ctypeslib.ndpointer(
-                dtype=np.float32, ndim=ndim, shape=shape_tuple, flags="C"
-            )
-        elif var_type_lower.startswith("int"):
-            arraytype = np.ctypeslib.ndpointer(
-                dtype=np.int32, ndim=ndim, shape=shape_tuple, flags="C"
-            )
-        else:
-            raise InputError(f"Unsupported value type {var_type!r}")
-        values = arraytype()
-        self._execute_function(
-            self.lib.get_value_ptr,
-            c_char_p(name.encode()),
-            byref(values),
-            detail="for variable " + name,
-        )
-        return values.contents
-
-    def get_value_ptr_scalar(self, name: str) -> NDArray[Any]:
-        var_type = self.get_var_type(name)
-        var_type_lower = var_type.lower()
-        if var_type_lower.startswith("double"):
-            arraytype = np.ctypeslib.ndpointer(
-                dtype=np.float64, ndim=1, shape=(1,), flags="C"
-            )
-        elif var_type_lower.startswith("float"):
-            arraytype = np.ctypeslib.ndpointer(
-                dtype=np.float32, ndim=1, shape=(1,), flags="C"
-            )
-        elif var_type_lower.startswith("int"):
-            arraytype = np.ctypeslib.ndpointer(
-                dtype=np.int32, ndim=1, shape=(1,), flags="C"
-            )
-        else:
-            raise InputError(f"Unsupported value type {var_type!r}")
-        values = arraytype()
-        self._execute_function(
-            self.lib.get_value_ptr,
-            c_char_p(name.encode()),
-            byref(values),
-            detail="for variable " + name,
-        )
-        return values.contents
 
     def get_value_at_indices(
         self, name: str, dest: NDArray[Any], inds: NDArray[np.int32]
