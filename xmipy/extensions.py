@@ -153,7 +153,10 @@ class PointersExtension(BmiPointers):
     """The ``"bmi:pointers"`` extension of a library wrapped by `XmiWrapper`.
 
     A pointer to a variable in ``"bmi:pointers:transient"`` must be fetched
-    again after any call that changes the model state.
+    again after any call that changes the model state. In libmf6 these move
+    only in ``prepare_time_step`` (and PRT committed particles also in
+    ``finalize_time_step``), so fetching after ``prepare_time_step`` or
+    ``update`` is enough.
     """
 
     def __init__(self, wrapper: "XmiWrapper", table: PointersTable):
