@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from xmipy import XmiWrapper
-from xmipy.errors import InputError
+from xmipy.errors import InputError, XMIError
 
 
 @pytest.fixture
@@ -189,34 +189,34 @@ def test_get_grid_type(flopy_dis_mf6):
     assert mf6.get_grid_type(grid_id) == "rectilinear"
 
 
-def test_get_input_item_count(flopy_dis_mf6):
-    _, mf6 = flopy_dis_mf6
-    mf6.initialize()
-
-    assert mf6.get_input_item_count() > 0
-
-
-def test_get_output_item_count(flopy_dis_mf6):
+def test_get_varset_member_count(flopy_dis_mf6):
     mf6 = flopy_dis_mf6[1]
     mf6.initialize()
 
-    assert mf6.get_output_item_count() > 0
+    n_input = mf6.get_varset_member_count("input")
+    assert n_input > 0
+    assert mf6.get_varset_member_count("output") == n_input
 
 
-def test_get_input_var_names(flopy_dis_mf6):
+def test_get_varset_members(flopy_dis_mf6):
     mf6 = flopy_dis_mf6[1]
     mf6.initialize()
 
-    assert "TEST_MODEL_DIS/X" in mf6.get_input_var_names()
-
-
-def test_get_output_var_names(flopy_dis_mf6):
-    mf6 = flopy_dis_mf6[1]
-    mf6.initialize()
-
-    var_names = mf6.get_output_var_names()
+    var_names = mf6.get_varset_members("output")
+    assert len(var_names) == mf6.get_varset_member_count("output")
     assert "TEST_MODEL_DIS/X" in var_names  # this is readwrite
     assert "SLN_1/IA" in var_names  # and this is readonly
+    assert mf6.get_varset_members("input") == var_names
+
+
+def test_get_varset_unknown(flopy_dis_mf6):
+    mf6 = flopy_dis_mf6[1]
+    mf6.initialize()
+
+    with pytest.raises(XMIError):
+        mf6.get_varset_member_count("not_a_set")
+    with pytest.raises(XMIError):
+        mf6.get_varset_members("not_a_set")
 
 
 def test_get_var_units(flopy_dis_mf6):
@@ -251,7 +251,7 @@ def test_get_value_double(flopy_dis_mf6):
     mf6.initialize()
 
     some_output_var = next(
-        var for var in mf6.get_output_var_names() if var.endswith("/X")
+        var for var in mf6.get_varset_members("output") if var.endswith("/X")
     )
 
     # compare to array in MODFLOW memory:
@@ -266,7 +266,7 @@ def test_get_value_double_inplace(flopy_dis_mf6):
     mf6.initialize()
 
     some_output_var = next(
-        var for var in mf6.get_output_var_names() if var.endswith("/X")
+        var for var in mf6.get_varset_members("output") if var.endswith("/X")
     )
     copy_arr = mf6.get_value_ptr(some_output_var).copy()
     copy_arr[:] = -99999.0
@@ -284,7 +284,7 @@ def test_get_value_int(flopy_dis_idomain_mf6):
     mf6.initialize()
 
     nodes_reduced_tag = next(
-        var for var in mf6.get_output_var_names() if var.endswith("/NODEREDUCED")
+        var for var in mf6.get_varset_members("output") if var.endswith("/NODEREDUCED")
     )
 
     # compare to array in MODFLOW memory:
@@ -299,7 +299,9 @@ def test_get_value_int_scalar(flopy_dis_idomain_mf6):
     mf6.initialize()
 
     # get scalar variable:
-    id_tag = next(var for var in mf6.get_output_var_names() if var.endswith("/NROW"))
+    id_tag = next(
+        var for var in mf6.get_varset_members("output") if var.endswith("/NROW")
+    )
     assert mf6.get_var_rank(id_tag) == 0
 
     # compare with value in MODFLOW memory:

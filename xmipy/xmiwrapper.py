@@ -244,53 +244,33 @@ class XmiWrapper(Xmi):
         self._execute_function(self.lib.get_version, byref(version))
         return version.value.decode("ascii")
 
-    def get_input_item_count(self) -> int:
+    def get_varset_member_count(self, set_name: str) -> int:
         count = c_int(0)
-        self._execute_function(self.lib.get_input_item_count, byref(count))
+        self._execute_function(
+            self.lib.get_varset_member_count,
+            c_char_p(set_name.encode()),
+            byref(count),
+        )
         return count.value
 
-    def get_output_item_count(self) -> int:
-        count = c_int(0)
-        self._execute_function(self.lib.get_output_item_count, byref(count))
-        return count.value
-
-    def get_input_var_names(self) -> Tuple[str]:
+    def get_varset_members(self, set_name: str) -> Tuple[str, ...]:
         len_address = self.get_constant_int("BMI_LENVARADDRESS")
-        nr_input_vars = self.get_input_item_count()
-        len_names = nr_input_vars * len_address
-        names = create_string_buffer(len_names)
+        count = self.get_varset_member_count(set_name)
+        names = create_string_buffer(max(1, count) * len_address)
 
-        # get a (1-dim) char array (char*) containing the input variable
-        # names as \x00 terminated sub-strings
-        self._execute_function(self.lib.get_input_var_names, byref(names))
-
-        # decode
-        input_vars: Tuple[str] = tuple(
+        # a (1-dim) char array (char*) holding the variable addresses as
+        # \x00 terminated sub-strings with stride BMI_LENVARADDRESS
+        self._execute_function(
+            self.lib.get_varset_members,
+            c_char_p(set_name.encode()),
+            byref(names),
+        )
+        return tuple(
             names[i * len_address : (i + 1) * len_address]  # type: ignore
             .split(b"\0", 1)[0]
             .decode("ascii")
-            for i in range(nr_input_vars)
+            for i in range(count)
         )
-        return input_vars
-
-    def get_output_var_names(self) -> Tuple[str]:
-        len_address = self.get_constant_int("BMI_LENVARADDRESS")
-        nr_output_vars = self.get_output_item_count()
-        len_names = nr_output_vars * len_address
-        names = create_string_buffer(len_names)
-
-        # get a (1-dim) char array (char*) containing the output variable
-        # names as \x00 terminated sub-strings
-        self._execute_function(self.lib.get_output_var_names, byref(names))
-
-        # decode
-        output_vars: Tuple[str] = tuple(
-            names[i * len_address : (i + 1) * len_address]  # type: ignore
-            .split(b"\0", 1)[0]
-            .decode("ascii")
-            for i in range(nr_output_vars)
-        )
-        return output_vars
 
     def get_var_grid(self, name: str) -> int:
         grid_id = c_int(0)
