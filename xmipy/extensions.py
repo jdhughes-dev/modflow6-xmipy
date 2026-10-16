@@ -165,33 +165,31 @@ class PointersExtension(BmiPointers):
             getattr(self._table, name), *args, name=name, **kwargs
         )
 
-    def get_var_rank(self, name: str) -> int:
+    def get_var_rank(self, index: int) -> int:
         rank = c_int(0)
-        self._call("get_var_rank", c_char_p(name.encode()), byref(rank))
+        self._call("get_var_rank", byref(c_int(index)), byref(rank))
         return rank.value
 
-    def get_var_shape(self, name: str) -> NDArray[np.int32]:
-        rank = self.get_var_rank(name)
+    def get_var_shape(self, index: int) -> NDArray[np.int32]:
+        rank = self.get_var_rank(index)
         array = np.zeros(rank, dtype=np.int32)
-        self._call(
-            "get_var_shape", c_char_p(name.encode()), c_void_p(array.ctypes.data)
-        )
+        self._call("get_var_shape", byref(c_int(index)), c_void_p(array.ctypes.data))
         return array
 
-    def get_value_ptr(self, name: str) -> NDArray[Any]:
+    def get_value_ptr(self, index: int) -> NDArray[Any]:
         # first scalars
-        rank = self.get_var_rank(name)
+        rank = self.get_var_rank(index)
         if rank == 0:
-            return self.get_value_ptr_scalar(name)
+            return self.get_value_ptr_scalar(index)
 
-        shape_tuple = tuple(np.trim_zeros(self.get_var_shape(name)))
-        return self._pointer(name, len(shape_tuple), shape_tuple)
+        shape_tuple = tuple(np.trim_zeros(self.get_var_shape(index)))
+        return self._pointer(index, len(shape_tuple), shape_tuple)
 
-    def get_value_ptr_scalar(self, name: str) -> NDArray[Any]:
-        return self._pointer(name, 1, (1,))
+    def get_value_ptr_scalar(self, index: int) -> NDArray[Any]:
+        return self._pointer(index, 1, (1,))
 
-    def _pointer(self, name: str, ndim: int, shape: Any) -> NDArray[Any]:
-        var_type = self._wrapper.get_var_type(name)
+    def _pointer(self, index: int, ndim: int, shape: Any) -> NDArray[Any]:
+        var_type = self._wrapper.get_var_type(index)
         var_type_lower = var_type.lower()
         if var_type_lower.startswith("double"):
             dtype: Any = np.float64
@@ -207,8 +205,8 @@ class PointersExtension(BmiPointers):
         values = arraytype()
         self._call(
             "get_value_ptr",
-            c_char_p(name.encode()),
+            byref(c_int(index)),
             byref(values),
-            detail="for variable " + name,
+            detail=f"for variable index {index}",
         )
         return values.contents  # type: ignore[no-any-return]

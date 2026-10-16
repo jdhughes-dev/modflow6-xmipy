@@ -344,54 +344,64 @@ class XmiWrapper(Bmi):
         )
         return self._decode_names(names, count, len_address)
 
-    def get_var_grid(self, name: str) -> int:
+    def get_var_index(self, name: str) -> int:
+        index = c_int(0)
+        self._execute_function(
+            self.lib.get_var_index,
+            c_char_p(name.encode()),
+            byref(index),
+            detail="for variable " + name,
+        )
+        return index.value
+
+    def get_var_grid(self, index: int) -> int:
         grid_id = c_int(0)
         self._execute_function(
             self.lib.get_var_grid,
-            c_char_p(name.encode()),
+            byref(c_int(index)),
             byref(grid_id),
         )
         return grid_id.value
 
-    def get_var_type(self, name: str) -> str:
+    def get_var_type(self, index: int) -> str:
         len_var_type = self.get_constant_int("BMI_LENVARTYPE")
         var_type = create_string_buffer(len_var_type)
         self._execute_function(
             self.lib.get_var_type,
-            c_char_p(name.encode()),
+            byref(c_int(index)),
             byref(var_type),
         )
         return var_type.value.decode()
 
-    def get_var_units(self, name: str) -> str:
+    def get_var_units(self, index: int) -> str:
         raise NotImplementedError
 
-    def get_var_itemsize(self, name: str) -> int:
+    def get_var_itemsize(self, index: int) -> int:
         item_size = c_int(0)
         self._execute_function(
             self.lib.get_var_itemsize,
-            c_char_p(name.encode()),
+            byref(c_int(index)),
             byref(item_size),
         )
         return item_size.value
 
-    def get_var_nbytes(self, name: str) -> int:
+    def get_var_nbytes(self, index: int) -> int:
         nbytes = c_int(0)
         self._execute_function(
             self.lib.get_var_nbytes,
-            c_char_p(name.encode()),
+            byref(c_int(index)),
             byref(nbytes),
         )
         return nbytes.value
 
-    def get_var_location(self, name: str) -> str:
+    def get_var_location(self, index: int) -> str:
         raise NotImplementedError
 
     def get_time_units(self) -> str:
         raise NotImplementedError
 
     def get_value(
-        self, name: str, dest: Union[NDArray[Any], None] = None
+        self, index: int, dest: Union[NDArray[Any], None] = None
     ) -> NDArray[Any]:
         """Get a flattened copy of the variable.
 
@@ -402,10 +412,10 @@ class XmiWrapper(Bmi):
         if dest is not None and not dest.flags["C"]:
             raise InputError("Array should have C layout")
 
-        var_type = self.get_var_type(name)
+        var_type = self.get_var_type(index)
         var_type_lower = var_type.lower()
-        nbytes = self.get_var_nbytes(name)
-        itemsize = self.get_var_itemsize(name)
+        nbytes = self.get_var_nbytes(index)
+        itemsize = self.get_var_itemsize(index)
         count = nbytes // itemsize if itemsize > 0 else 0
 
         if var_type_lower.startswith("double"):
@@ -413,7 +423,7 @@ class XmiWrapper(Bmi):
                 dest = np.empty(count, dtype=np.float64, order="C")
             self._execute_function(
                 self.lib.get_value,
-                c_char_p(name.encode()),
+                byref(c_int(index)),
                 byref(dest.ctypes.data_as(POINTER(c_double))),
             )
         elif var_type_lower.startswith("int"):
@@ -421,7 +431,7 @@ class XmiWrapper(Bmi):
                 dest = np.empty(count, dtype=np.int32, order="C")
             self._execute_function(
                 self.lib.get_value,
-                c_char_p(name.encode()),
+                byref(c_int(index)),
                 byref(dest.ctypes.data_as(POINTER(c_int))),
             )
         elif var_type_lower.startswith("string"):
@@ -432,7 +442,7 @@ class XmiWrapper(Bmi):
                 dest = np.empty(count, dtype="<S" + str(itemsize + 1), order="C")
             self._execute_function(
                 self.lib.get_value,
-                c_char_p(name.encode()),
+                byref(c_int(index)),
                 byref(dest.ctypes.data_as(POINTER(c_char))),
             )
             for i, x in enumerate(dest):
@@ -444,21 +454,21 @@ class XmiWrapper(Bmi):
         return dest
 
     def get_value_at_indices(
-        self, name: str, dest: NDArray[Any], inds: NDArray[np.int32]
+        self, index: int, dest: NDArray[Any], inds: NDArray[np.int32]
     ) -> NDArray[Any]:
         raise NotImplementedError
 
-    def set_value(self, name: str, values: NDArray[Any]) -> None:
+    def set_value(self, index: int, values: NDArray[Any]) -> None:
         if not values.flags["C"]:
             raise InputError("Array should have C layout")
-        var_type = self.get_var_type(name)
+        var_type = self.get_var_type(index)
         var_type_lower = var_type.lower()
         if var_type_lower.startswith("double"):
             if values.dtype != np.float64:
                 raise InputError("Array should have float64 elements")
             self._execute_function(
                 self.lib.set_value,
-                c_char_p(name.encode()),
+                byref(c_int(index)),
                 byref(values.ctypes.data_as(POINTER(c_double))),
             )
         elif var_type_lower.startswith("int"):
@@ -466,14 +476,14 @@ class XmiWrapper(Bmi):
                 raise InputError("Array should have int32 elements")
             self._execute_function(
                 self.lib.set_value,
-                c_char_p(name.encode()),
+                byref(c_int(index)),
                 byref(values.ctypes.data_as(POINTER(c_int))),
             )
         else:
             raise InputError("Unsupported value type")
 
     def set_value_at_indices(
-        self, name: str, inds: NDArray[Any], src: NDArray[Any]
+        self, index: int, inds: NDArray[Any], src: NDArray[Any]
     ) -> None:
         raise NotImplementedError
 

@@ -91,7 +91,7 @@ def test_get_var_type_double(flopy_dis_mf6):
     xmi = mf6.get_extension("xmi")
 
     head_tag = xmi.get_var_address("X", "SLN_1")
-    assert mf6.get_var_type(head_tag) == "DOUBLE (90)"
+    assert mf6.get_var_type(mf6.get_var_index(head_tag)) == "DOUBLE (90)"
 
 
 def test_get_var_type_int(flopy_dis_mf6):
@@ -100,7 +100,7 @@ def test_get_var_type_int(flopy_dis_mf6):
     xmi = mf6.get_extension("xmi")
 
     iactive_tag = xmi.get_var_address("IACTIVE", "SLN_1")
-    assert mf6.get_var_type(iactive_tag) == "INTEGER (90)"
+    assert mf6.get_var_type(mf6.get_var_index(iactive_tag)) == "INTEGER (90)"
 
 
 def test_get_var_string(flopy_dis_mf6):
@@ -110,9 +110,9 @@ def test_get_var_string(flopy_dis_mf6):
     ptrs = mf6.get_extension("bmi:pointers")
 
     name_tag = xmi.get_var_address("NAME", flopy_dis.model_name)
-    assert ptrs.get_var_rank(name_tag) == 0
-    assert mf6.get_var_type(name_tag) == "STRING LEN=16"
-    assert mf6.get_value(name_tag).tolist() == ["TEST_MODEL_DIS"]
+    assert ptrs.get_var_rank(mf6.get_var_index(name_tag)) == 0
+    assert mf6.get_var_type(mf6.get_var_index(name_tag)) == "STRING LEN=16"
+    assert mf6.get_value(mf6.get_var_index(name_tag)).tolist() == ["TEST_MODEL_DIS"]
 
 
 def test_set_var_string(flopy_dis_mf6):
@@ -121,11 +121,11 @@ def test_set_var_string(flopy_dis_mf6):
     xmi = mf6.get_extension("xmi")
 
     name_tag = xmi.get_var_address("NAME", flopy_dis.model_name)
-    assert mf6.get_var_type(name_tag) == "STRING LEN=16"
+    assert mf6.get_var_type(mf6.get_var_index(name_tag)) == "STRING LEN=16"
 
     # this is not yet supported
     with pytest.raises(InputError, match="Unsupported value type"):
-        mf6.set_value(name_tag, np.array(["VladDeSpietser"]))
+        mf6.set_value(mf6.get_var_index(name_tag), np.array(["VladDeSpietser"]))
 
 
 def test_get_var_stringarray(flopy_dis_mf6):
@@ -139,11 +139,11 @@ def test_get_var_stringarray(flopy_dis_mf6):
 
     # test var with rank 1 and shape [0]
     name_tag = xmi.get_var_address("AUXNAME_CST", flopy_dis.model_name, "CHD_0")
-    assert ptrs.get_var_rank(name_tag) == 1
-    assert ptrs.get_var_shape(name_tag) == [0]
-    assert mf6.get_var_nbytes(name_tag) == 0
-    assert mf6.get_var_type(name_tag) == "STRING LEN=16 (0)"
-    assert mf6.get_value(name_tag).tolist() == []
+    assert ptrs.get_var_rank(mf6.get_var_index(name_tag)) == 1
+    assert ptrs.get_var_shape(mf6.get_var_index(name_tag)) == [0]
+    assert mf6.get_var_nbytes(mf6.get_var_index(name_tag)) == 0
+    assert mf6.get_var_type(mf6.get_var_index(name_tag)) == "STRING LEN=16 (0)"
+    assert mf6.get_value(mf6.get_var_index(name_tag)).tolist() == []
 
 
 def test_get_value_ptr_modelname(flopy_dis_mf6):
@@ -159,7 +159,7 @@ def test_get_value_ptr_modelname(flopy_dis_mf6):
 
     mf6.update()
     head_tag = xmi.get_var_address("X", flopy_dis.model_name)
-    actual_head = ptrs.get_value_ptr(head_tag)
+    actual_head = ptrs.get_value_ptr(mf6.get_var_index(head_tag))
 
     for cell_id, presciped_head, _ in stress_period_data:
         head_index = np.ravel_multi_index(cell_id, shape)
@@ -174,7 +174,7 @@ def test_get_value_ptr_scalar(flopy_dis_mf6):
 
     mf6.update()
     id_tag = xmi.get_var_address("ID", flopy_dis.model_name)
-    grid_id = ptrs.get_value_ptr_scalar(id_tag)
+    grid_id = ptrs.get_value_ptr_scalar(mf6.get_var_index(id_tag))
 
     # Only one model is defined => id should be 1
     # grid_id[0], because even scalars are defined as arrays
@@ -189,10 +189,10 @@ def test_get_var_grid(flopy_dis_mf6):
 
     # Getting the grid id from the model, requires specifying one variable
     k11_tag = xmi.get_var_address("K11", flopy_dis.model_name, "NPF")
-    prescribed_grid_id = mf6.get_var_grid(k11_tag)
+    prescribed_grid_id = mf6.get_var_grid(mf6.get_var_index(k11_tag))
 
     id_tag = xmi.get_var_address("ID", flopy_dis.model_name)
-    assert ptrs.get_value_ptr(id_tag) == [prescribed_grid_id]
+    assert ptrs.get_value_ptr(mf6.get_var_index(id_tag)) == [prescribed_grid_id]
 
 
 def test_get_grid_type(flopy_dis_mf6):
@@ -203,7 +203,7 @@ def test_get_grid_type(flopy_dis_mf6):
 
     # Getting the grid id from the model, requires specifying one variable
     k11_tag = xmi.get_var_address("K11", flopy_dis.model_name, "NPF")
-    grid_id = mf6.get_var_grid(k11_tag)
+    grid_id = mf6.get_var_grid(mf6.get_var_index(k11_tag))
     assert mf6.get_grid_type(grid_id) == "rectilinear"
 
 
@@ -237,13 +237,44 @@ def test_get_varset_unknown(flopy_dis_mf6):
         mf6.get_varset_members("not_a_set")
 
 
+def test_get_var_index(flopy_dis_mf6):
+    mf6 = flopy_dis_mf6[1]
+    mf6.initialize()
+
+    names = mf6.get_varset_members("input")
+    indices = [mf6.get_var_index(name) for name in names]
+    assert len(set(indices)) == len(names)
+    assert mf6.get_var_index(names[0]) == indices[0]
+
+
+def test_get_var_index_across_run(flopy_dis_mf6):
+    flopy_dis, mf6 = flopy_dis_mf6
+    mf6.initialize()
+
+    head_tag = f"{flopy_dis.model_name}/X"
+    head_index = mf6.get_var_index(head_tag)
+    while mf6.get_current_time() < mf6.get_end_time():
+        mf6.update()
+    assert mf6.get_var_index(head_tag) == head_index
+
+
+def test_invalid_var_index(flopy_dis_mf6):
+    mf6 = flopy_dis_mf6[1]
+    mf6.initialize()
+
+    with pytest.raises(XMIError):
+        mf6.get_var_type(0)
+    with pytest.raises(XMIError):
+        mf6.get_var_nbytes(10**6)
+
+
 def test_get_var_units(flopy_dis_mf6):
     """Expects to be implemented as soon as `get_var_units` is implemented"""
     mf6 = flopy_dis_mf6[1]
     mf6.initialize()
 
     with pytest.raises(NotImplementedError):
-        mf6.get_var_units("")
+        mf6.get_var_units(0)
 
 
 def test_get_var_location(flopy_dis_mf6):
@@ -252,7 +283,7 @@ def test_get_var_location(flopy_dis_mf6):
     mf6.initialize()
 
     with pytest.raises(NotImplementedError):
-        mf6.get_var_location("")
+        mf6.get_var_location(0)
 
 
 def test_get_time_units(flopy_dis_mf6):
@@ -275,8 +306,8 @@ def test_get_value_double(flopy_dis_mf6):
 
     # compare to array in MODFLOW memory:
     np.testing.assert_array_equal(
-        mf6.get_value(some_output_var),
-        ptrs.get_value_ptr(some_output_var),
+        mf6.get_value(mf6.get_var_index(some_output_var)),
+        ptrs.get_value_ptr(mf6.get_var_index(some_output_var)),
     )
 
 
@@ -288,14 +319,14 @@ def test_get_value_double_inplace(flopy_dis_mf6):
     some_output_var = next(
         var for var in mf6.get_varset_members("output") if var.endswith("/X")
     )
-    copy_arr = ptrs.get_value_ptr(some_output_var).copy()
+    copy_arr = ptrs.get_value_ptr(mf6.get_var_index(some_output_var)).copy()
     copy_arr[:] = -99999.0
-    mf6.get_value(some_output_var, copy_arr)
+    mf6.get_value(mf6.get_var_index(some_output_var), copy_arr)
 
     # compare to array in MODFLOW memory:
     np.testing.assert_array_equal(
         copy_arr,
-        ptrs.get_value_ptr(some_output_var),
+        ptrs.get_value_ptr(mf6.get_var_index(some_output_var)),
     )
 
 
@@ -310,8 +341,8 @@ def test_get_value_int(flopy_dis_idomain_mf6):
 
     # compare to array in MODFLOW memory:
     np.testing.assert_array_equal(
-        mf6.get_value(nodes_reduced_tag),
-        ptrs.get_value_ptr(nodes_reduced_tag),
+        mf6.get_value(mf6.get_var_index(nodes_reduced_tag)),
+        ptrs.get_value_ptr(mf6.get_var_index(nodes_reduced_tag)),
     )
 
 
@@ -324,12 +355,12 @@ def test_get_value_int_scalar(flopy_dis_idomain_mf6):
     id_tag = next(
         var for var in mf6.get_varset_members("output") if var.endswith("/NROW")
     )
-    assert ptrs.get_var_rank(id_tag) == 0
+    assert ptrs.get_var_rank(mf6.get_var_index(id_tag)) == 0
 
     # compare with value in MODFLOW memory:
     np.testing.assert_array_equal(
-        mf6.get_value(id_tag),
-        ptrs.get_value_ptr(id_tag),
+        mf6.get_value(mf6.get_var_index(id_tag)),
+        ptrs.get_value_ptr(mf6.get_var_index(id_tag)),
     )
 
 
@@ -339,7 +370,7 @@ def test_get_value_at_indices(flopy_dis_idomain_mf6):
     mf6.initialize()
 
     with pytest.raises(NotImplementedError):
-        mf6.get_value_at_indices("", np.zeros((1, 1)), np.zeros((1, 1)))
+        mf6.get_value_at_indices(0, np.zeros((1, 1)), np.zeros((1, 1)))
 
 
 def test_set_value(flopy_dis_mf6):
@@ -350,17 +381,17 @@ def test_set_value(flopy_dis_mf6):
 
     # 1D double array
     head_tag = xmi.get_var_address("X", flopy_dis.model_name)
-    orig_head = ptrs.get_value_ptr(head_tag)
+    orig_head = ptrs.get_value_ptr(mf6.get_var_index(head_tag))
     new_head = 2.0 * orig_head
-    mf6.set_value(head_tag, new_head)
+    mf6.set_value(mf6.get_var_index(head_tag), new_head)
     np.testing.assert_array_equal(orig_head, new_head)
 
     # 1D integer array
     mxit_tag = xmi.get_var_address("MXITER", "SLN_1")
     arr_int = np.zeros(shape=(1,), dtype=np.int32)
     arr_int[0] = 999
-    mf6.set_value(mxit_tag, arr_int)
-    assert mf6.get_value(mxit_tag).tolist() == [999]
+    mf6.set_value(mf6.get_var_index(mxit_tag), arr_int)
+    assert mf6.get_value(mf6.get_var_index(mxit_tag)).tolist() == [999]
 
 
 def test_set_value_at_indices(flopy_dis_mf6):
@@ -369,7 +400,7 @@ def test_set_value_at_indices(flopy_dis_mf6):
     mf6.initialize()
 
     with pytest.raises(NotImplementedError):
-        mf6.set_value_at_indices("", np.zeros((1, 1)), np.zeros((1, 1)))
+        mf6.set_value_at_indices(0, np.zeros((1, 1)), np.zeros((1, 1)))
 
 
 def test_get_grid_rank(flopy_dis_mf6):
@@ -382,7 +413,7 @@ def test_get_grid_rank(flopy_dis_mf6):
 
     # Getting the grid id from the model, requires specifying one variable
     k11_tag = xmi.get_var_address("K11", flopy_dis.model_name, "NPF")
-    grid_id = mf6.get_var_grid(k11_tag)
+    grid_id = mf6.get_var_grid(mf6.get_var_index(k11_tag))
 
     assert prescribed_grid_rank == mf6.get_grid_rank(grid_id)
 
@@ -397,7 +428,7 @@ def test_get_grid_size(flopy_dis_mf6):
 
     # Getting the grid id from the model, requires specifying one variable
     k11_tag = xmi.get_var_address("K11", flopy_dis.model_name, "NPF")
-    grid_id = mf6.get_var_grid(k11_tag)
+    grid_id = mf6.get_var_grid(mf6.get_var_index(k11_tag))
 
     assert prescribed_grid_size == mf6.get_grid_size(grid_id)
 

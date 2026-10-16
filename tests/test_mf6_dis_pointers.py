@@ -39,10 +39,10 @@ def test_stable_pointer_tracks_run(flopy_dis_mf6):
     mf6.initialize(requested_extensions=["bmi:pointers"])
     ptrs = mf6.get_extension("bmi:pointers")
 
-    head_tag = f"{flopy_dis.model_name}/X"
-    head = ptrs.get_value_ptr(head_tag)
+    head_index = mf6.get_var_index(f"{flopy_dis.model_name}/X")
+    head = ptrs.get_value_ptr(head_index)
     while mf6.get_current_time() < mf6.get_end_time():
         mf6.update()
 
-    np.testing.assert_array_equal(head, mf6.get_value(head_tag))
-    assert head.ctypes.data == ptrs.get_value_ptr(head_tag).ctypes.data
+    np.testing.assert_array_equal(head, mf6.get_value(head_index))
+    assert head.ctypes.data == ptrs.get_value_ptr(head_index).ctypes.data
