@@ -9,6 +9,12 @@ The extended interface is required to couple certain hydrological kernels, parti
 
 `xmipy` can be downloaded from [conda-forge](https://anaconda.org/conda-forge/xmipy) or [PyPI](https://pypi.org/project/xmipy/).
 
+This branch is a BMI 3.0-alpha1 prototype. It tracks the `bmi-3-development`
+branch of [csdms/bmi](https://github.com/csdms/bmi), requires bmipy from the
+`bmi-3` branch of [jdhughes-dev/bmi-python](https://github.com/jdhughes-dev/bmi-python),
+and needs a libmf6 built from the `bmi-3` branch of
+[jdhughes-dev/modflow6](https://github.com/jdhughes-dev/modflow6).
+
 # Contributing
 
 In order to develop on `xmipy`, you have to download pixi.

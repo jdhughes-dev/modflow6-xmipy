@@ -11,4 +11,4 @@ from xmipy.xmiwrapper import XmiWrapper
 
 __all__ = ["Bmi", "Xmi", "XmiWrapper"]
 
-__version__ = "1.5.0"
+__version__ = "2.0.0a1"

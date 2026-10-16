@@ -18,8 +18,12 @@ classifiers = [
     "License :: CC0 1.0 Universal (CC0 1.0) Public Domain Dedication",
     "Topic :: Scientific/Engineering :: Hydrology",
 ]
-requires-python = ">=3.9"
-dependencies = ["bmipy", "numpy"]
+requires-python = ">=3.10"
+# BMI 3.0 prototype; bmipy 3 is not released
+dependencies = [
+    "bmipy @ git+https://github.com/jdhughes-dev/bmi-python@bmi-3",
+    "numpy",
+]
 dynamic = ["version"]
 
 [project.optional-dependencies]
@@ -30,6 +34,9 @@ docs = ["pdoc"]
 [project.urls]
 Documentation = "https://deltares.github.io/xmipy/xmipy.html"
 Source = "https://github.com/Deltares/xmipy"
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["xmipy"]
@@ -88,15 +95,11 @@ python = "3.11.*"
 [tool.pixi.feature.py310.dependencies]
 python = "3.10.*"
 
-[tool.pixi.feature.py39.dependencies]
-python = "3.9.*"
-
 [tool.pixi.environments]
 default = { features = ["py312"], solve-group = "py312" }
 py312 = { features = ["py312"], solve-group = "py312" }
 py311 = ["py311"]
 py310 = ["py310"]
-py39 = ["py39"]
 
 [tool.pytest.ini_options]
 addopts = "-vs"

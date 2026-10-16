@@ -231,6 +231,13 @@ class XmiWrapper(Xmi):
         self._execute_function(self.lib.get_component_name, byref(component_name))
         return component_name.value.decode("ascii")
 
+    def get_bmi_version(self) -> str:
+        """Get the version of the BMI specification the library implements."""
+        len_version = self.get_constant_int("BMI_LENVERSION")
+        version = create_string_buffer(len_version)
+        self._execute_function(self.lib.get_bmi_version, byref(version))
+        return version.value.decode("ascii")
+
     def get_version(self) -> str:
         len_version = self.get_constant_int("BMI_LENVERSION")
         version = create_string_buffer(len_version)

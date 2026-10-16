@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pixi-environment: ["py39", "py310", "py311", "py312"]
+        pixi-environment: ["py310", "py311", "py312"]
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v6
