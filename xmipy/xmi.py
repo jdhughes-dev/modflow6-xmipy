@@ -1,23 +1,16 @@
 from abc import abstractmethod
 
-from bmipy import Bmi
+from bmipy import BmiExtension
 
 
-class Xmi(Bmi):
+class Xmi(BmiExtension):
     """
-    This class extends the CSDMS Basic Model Interface
+    The eXtended Model Interface, the BMI extension ``"xmi"``.
 
-    The extension to the BMI is twofold:
-
-    - the model's outer convergence loop is exposed to facilitate coupling at
-      this level
-
-    - a model can have sub-components which share the time stepping but have
-      their own convergence loop
-
-    Since it only extends the BMI, models implementing
-    the XMI are compatible with BMI
-
+    Request ``"xmi"`` at ``initialize`` and get this object from
+    ``get_extension("xmi")``. It exposes the model's outer convergence loop,
+    and sub-components that share the time stepping but have their own
+    convergence loop.
     """
 
     @abstractmethod
@@ -119,51 +112,6 @@ class Xmi(Bmi):
     @abstractmethod
     def get_version(self) -> str:
         """Get the version of the kernel."""
-        ...
-
-    @abstractmethod
-    def report_timing_totals(self) -> float:
-        """Logs and returns total time spent
-
-        Returns
-        -------
-        float
-            Total time spent
-
-        Raises
-        ------
-        TimerError
-            Raised if timing is not activated
-        """
-        ...
-
-    @abstractmethod
-    def get_constant_int(self, name: str) -> int:
-        """Get a constant integer
-
-        Parameters
-        ----------
-        name : str
-            Name of the constant
-
-        Returns
-        -------
-        int
-            Constant to be returned
-        """
-        ...
-
-    @abstractmethod
-    def set_int(self, name: str, value: int) -> None:
-        """Set integer
-
-        Parameters
-        ----------
-        name : str
-            Integer to be set
-        value : int
-            Value to set the integer to
-        """
         ...
 
     @abstractmethod

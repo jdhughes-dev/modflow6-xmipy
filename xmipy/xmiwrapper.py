@@ -15,16 +15,22 @@ from ctypes import (
 from enum import Enum, IntEnum, unique
 from os import PathLike
 from pathlib import Path
-from typing import Any, Callable, Tuple, Union
+from typing import Any, Callable, Dict, Sequence, Tuple, Union
 
 import numpy as np
+from bmipy import Bmi, BmiExtension
 from numpy.typing import NDArray
 
 from xmipy.errors import InputError, TimerError, XMIError
+from xmipy.extensions import (
+    XMI_TABLE_VERSION,
+    XmiExtension,
+    XmiTable,
+    table_from_pointer,
+)
 from xmipy.logger import get_logger, show_logger_message
 from xmipy.timers.timer import Timer
 from xmipy.utils import cd, repr_function_call
-from xmipy.xmi import Xmi
 
 
 @unique
@@ -39,8 +45,8 @@ class State(Enum):
     INITIALIZED = 2
 
 
-class XmiWrapper(Xmi):
-    """The implementation of the XMI"""
+class XmiWrapper(Bmi):
+    """The BMI of a shared library, with its extensions such as the XMI"""
 
     def __init__(
         self,
@@ -109,6 +115,7 @@ class XmiWrapper(Xmi):
         """
 
         self._state = State.UNINITIALIZED
+        self._extensions: Dict[str, BmiExtension] = {}
         self.libname = Path(lib_path).name
         self.logger = get_logger(self.libname, logger_level)
 
@@ -172,22 +179,89 @@ class XmiWrapper(Xmi):
         c_var = c_int.in_dll(self.lib, name)
         c_var.value = value
 
-    def initialize(self, config_file: Union[str, PathLike[Any]] = "") -> None:
-        if self._state == State.UNINITIALIZED:
-            with cd(self.working_directory):
-                self._execute_function(self.lib.initialize, os.fsencode(config_file))
-                self._state = State.INITIALIZED
-        else:
+    def initialize(
+        self,
+        config_file: Union[str, PathLike[Any]] = "",
+        requested_extensions: Sequence[str] = (),
+    ) -> Tuple[str, ...]:
+        if self._state != State.UNINITIALIZED:
             raise InputError("The library is already initialized")
+        args, supported = self._extension_args(requested_extensions)
+        with cd(self.working_directory):
+            self._execute_function(self.lib.initialize, os.fsencode(config_file), *args)
+            self._state = State.INITIALIZED
+        return supported()
 
-    def initialize_mpi(self, value: int) -> None:
-        if self._state == State.UNINITIALIZED:
-            with cd(self.working_directory):
-                comm = c_int(value)
-                self._execute_function(self.lib.initialize_mpi, byref(comm))
-                self._state = State.INITIALIZED
-        else:
+    def initialize_mpi(
+        self,
+        value: int,
+        config_file: Union[str, PathLike[Any]] = "",
+        requested_extensions: Sequence[str] = (),
+    ) -> Tuple[str, ...]:
+        if self._state != State.UNINITIALIZED:
             raise InputError("The library is already initialized")
+        args, supported = self._extension_args(requested_extensions)
+        with cd(self.working_directory):
+            comm = c_int(value)
+            self._execute_function(
+                self.lib.initialize_mpi, byref(comm), os.fsencode(config_file), *args
+            )
+            self._state = State.INITIALIZED
+        return supported()
+
+    def _extension_args(
+        self, requested_extensions: Sequence[str]
+    ) -> Tuple[Tuple[Any, ...], Callable[[], Tuple[str, ...]]]:
+        """Arguments for the extension lists of initialize.
+
+        Returns the requested count and names with the supported count and
+        name buffer, and a function that decodes the supported names.
+        """
+        len_name = self.get_constant_int("BMI_LENEXTENSIONNAME")
+        n_requested = c_int(len(requested_extensions))
+        requested = self._encode_names(requested_extensions, len_name)
+        n_supported = c_int(0)
+        supported = create_string_buffer(max(1, len(requested_extensions)) * len_name)
+
+        def decode() -> Tuple[str, ...]:
+            return self._decode_names(supported, n_supported.value, len_name)
+
+        args = (byref(n_requested), requested, byref(n_supported), supported)
+        return args, decode
+
+    @staticmethod
+    def _encode_names(names: Sequence[str], length: int) -> Any:
+        """Pack names into a flat buffer with the given stride."""
+        packed = bytearray(max(1, len(names)) * length)
+        for i, name in enumerate(names):
+            encoded = name.encode("ascii")
+            if len(encoded) >= length:
+                raise InputError(f"Name {name!r} is longer than {length - 1}")
+            packed[i * length : i * length + len(encoded)] = encoded
+        return create_string_buffer(bytes(packed), len(packed))
+
+    @staticmethod
+    def _decode_names(buffer: Any, count: int, length: int) -> Tuple[str, ...]:
+        """Unpack names from a flat buffer with the given stride."""
+        return tuple(
+            buffer[i * length : (i + 1) * length].split(b"\0", 1)[0].decode("ascii")
+            for i in range(count)
+        )
+
+    def get_extension(self, extension_name: str) -> BmiExtension:
+        if extension_name not in self._extensions:
+            table_ptr = c_void_p()
+            self._execute_function(
+                self.lib.get_extension,
+                c_char_p(extension_name.encode()),
+                byref(table_ptr),
+            )
+            if extension_name == "xmi":
+                table = table_from_pointer(table_ptr, XmiTable, XMI_TABLE_VERSION)
+                self._extensions[extension_name] = XmiExtension(self, table)
+            else:
+                raise InputError(f"xmipy does not support {extension_name!r}")
+        return self._extensions[extension_name]
 
     def update(self) -> None:
         with cd(self.working_directory):
@@ -202,6 +276,7 @@ class XmiWrapper(Xmi):
             with cd(self.working_directory):
                 self._execute_function(self.lib.finalize)
                 self._state = State.UNINITIALIZED
+                self._extensions.clear()
         else:
             raise InputError("The library is not initialized yet")
 
@@ -238,12 +313,6 @@ class XmiWrapper(Xmi):
         self._execute_function(self.lib.get_bmi_version, byref(version))
         return version.value.decode("ascii")
 
-    def get_version(self) -> str:
-        len_version = self.get_constant_int("BMI_LENVERSION")
-        version = create_string_buffer(len_version)
-        self._execute_function(self.lib.get_version, byref(version))
-        return version.value.decode("ascii")
-
     def get_varset_member_count(self, set_name: str) -> int:
         count = c_int(0)
         self._execute_function(
@@ -265,12 +334,7 @@ class XmiWrapper(Xmi):
             c_char_p(set_name.encode()),
             byref(names),
         )
-        return tuple(
-            names[i * len_address : (i + 1) * len_address]  # type: ignore
-            .split(b"\0", 1)[0]
-            .decode("ascii")
-            for i in range(count)
-        )
+        return self._decode_names(names, count, len_address)
 
     def get_var_grid(self, name: str) -> int:
         grid_id = c_int(0)
@@ -638,69 +702,19 @@ class XmiWrapper(Xmi):
         )
         return nodes_per_face
 
-    # ===========================
-    # here starts the XMI
-    # ===========================
-    def prepare_time_step(self, dt: float) -> None:
-        with cd(self.working_directory):
-            c_dt = c_double(dt)
-            self._execute_function(self.lib.prepare_time_step, byref(c_dt))
-
-    def do_time_step(self) -> None:
-        with cd(self.working_directory):
-            self._execute_function(self.lib.do_time_step)
-
-    def finalize_time_step(self) -> None:
-        with cd(self.working_directory):
-            self._execute_function(self.lib.finalize_time_step)
-
-    def get_subcomponent_count(self) -> int:
-        count = c_int(0)
-        self._execute_function(self.lib.get_subcomponent_count, byref(count))
-        return count.value
-
-    def prepare_solve(self, component_id: int = 1) -> None:
-        cid = c_int(component_id)
-        with cd(self.working_directory):
-            self._execute_function(self.lib.prepare_solve, byref(cid))
-
-    def solve(self, component_id: int = 1) -> bool:
-        cid = c_int(component_id)
-        has_converged = c_int(0)
-        with cd(self.working_directory):
-            self._execute_function(self.lib.solve, byref(cid), byref(has_converged))
-        return has_converged.value == 1
-
-    def finalize_solve(self, component_id: int = 1) -> None:
-        cid = c_int(component_id)
-
-        with cd(self.working_directory):
-            self._execute_function(self.lib.finalize_solve, byref(cid))
-
-    def get_var_address(
-        self, var_name: str, component_name: str, subcomponent_name: str = ""
-    ) -> str:
-        len_var_address = self.get_constant_int("BMI_LENVARADDRESS")
-        var_address = create_string_buffer(len_var_address)
-        self._execute_function(
-            self.lib.get_var_address,
-            c_char_p(component_name.upper().encode()),
-            c_char_p(subcomponent_name.upper().encode()),
-            c_char_p(var_name.upper().encode()),
-            byref(var_address),
-        )
-
-        return var_address.value.decode()
-
     def _execute_function(
         self, function: Callable[[Any], int], *args: Any, **kwargs: Any
     ) -> None:
         """
         Utility function to execute a BMI function in the kernel and checks its status
+
+        Pass ``name`` for functions without a ``__name__``, such as those in an
+        extension's function table.
         """
+        name = kwargs.get("name", getattr(function, "__name__", "?"))
 
         if self.timing:
-            self.timer.start(function.__name__)
+            self.timer.start(name)
 
         try:
             # Execute library function
@@ -709,13 +723,13 @@ class XmiWrapper(Xmi):
             if self.logger.isEnabledFor(logging.DEBUG):
                 self.logger.debug(
                     "execute function: %s returned %s",
-                    repr_function_call(function.__name__, *args),
+                    repr_function_call(name, *args),
                     result,
                 )
 
             if result != Status.SUCCESS:
                 msg = "BMI exception in "
-                msg += repr_function_call(function.__name__, *args)
+                msg += repr_function_call(name, *args)
 
                 # try to get detailed error msg, beware:
                 # directly call CDLL methods to avoid recursion
@@ -744,4 +758,4 @@ class XmiWrapper(Xmi):
 
         finally:
             if self.timing:
-                self.timer.stop(function.__name__)
+                self.timer.stop(name)
