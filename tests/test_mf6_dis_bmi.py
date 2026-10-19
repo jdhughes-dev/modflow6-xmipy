@@ -269,30 +269,49 @@ def test_invalid_var_index(flopy_dis_mf6):
 
 
 def test_get_var_units(flopy_dis_mf6):
-    """Expects to be implemented as soon as `get_var_units` is implemented"""
-    mf6 = flopy_dis_mf6[1]
-    mf6.initialize()
+    """MODFLOW does not store units, so every variable is 'unknown'"""
+    flopy_dis, mf6 = flopy_dis_mf6
+    mf6.initialize(requested_extensions=["xmi"])
+    xmi = mf6.get_extension("xmi")
 
-    with pytest.raises(NotImplementedError):
-        mf6.get_var_units(0)
+    head_tag = xmi.get_var_address("X", flopy_dis.model_name)
+    assert mf6.get_var_units(mf6.get_var_index(head_tag)) == "unknown"
+    with pytest.raises(XMIError):
+        mf6.get_var_units(10**6)
 
 
 def test_get_var_location(flopy_dis_mf6):
-    """Expects to be implemented as soon as `get_var_location` is implemented"""
-    mf6 = flopy_dis_mf6[1]
-    mf6.initialize()
+    """Every variable is reported at the grid nodes"""
+    flopy_dis, mf6 = flopy_dis_mf6
+    mf6.initialize(requested_extensions=["xmi"])
+    xmi = mf6.get_extension("xmi")
 
-    with pytest.raises(NotImplementedError):
-        mf6.get_var_location(0)
+    head_tag = xmi.get_var_address("X", flopy_dis.model_name)
+    assert mf6.get_var_location(mf6.get_var_index(head_tag)) == "node"
+    with pytest.raises(XMIError):
+        mf6.get_var_location(10**6)
 
 
 def test_get_time_units(flopy_dis_mf6):
-    """Expects to be implemented as soon as `get_time_units` is implemented"""
+    """TIME_UNITS DAYS in the TDIS Package is the UDUNITS symbol 'd'"""
     mf6 = flopy_dis_mf6[1]
     mf6.initialize()
 
-    with pytest.raises(NotImplementedError):
-        mf6.get_time_units()
+    assert mf6.get_time_units() == "d"
+
+
+def test_update_until(flopy_dis_mf6):
+    mf6 = flopy_dis_mf6[1]
+    mf6.initialize()
+    end_time = mf6.get_end_time()
+
+    with pytest.raises(XMIError):
+        mf6.update_until(end_time + 1.0)
+    assert mf6.get_current_time() == mf6.get_start_time()
+    mf6.update_until(end_time)
+    assert mf6.get_current_time() == end_time
+    with pytest.raises(XMIError):
+        mf6.update_until(mf6.get_start_time())
 
 
 def test_get_value_double(flopy_dis_mf6):
@@ -365,12 +384,35 @@ def test_get_value_int_scalar(flopy_dis_idomain_mf6):
 
 
 def test_get_value_at_indices(flopy_dis_idomain_mf6):
-    """Expects to be implemented as soon as `get_value_at_indices` is implemented"""
-    mf6 = flopy_dis_idomain_mf6[1]
-    mf6.initialize()
+    flopy_dis, mf6 = flopy_dis_idomain_mf6
+    mf6.initialize(requested_extensions=["xmi"])
+    xmi = mf6.get_extension("xmi")
 
-    with pytest.raises(NotImplementedError):
-        mf6.get_value_at_indices(0, np.zeros((1, 1)), np.zeros((1, 1)))
+    # double precision
+    k11_index = mf6.get_var_index(
+        xmi.get_var_address("K11", flopy_dis.model_name, "NPF")
+    )
+    k11 = mf6.get_value(k11_index)
+    inds = np.array([k11.size - 1, 0, 2], dtype=np.int32)
+    dest = np.zeros(inds.size, dtype=np.float64)
+    mf6.get_value_at_indices(k11_index, dest, inds)
+    np.testing.assert_array_equal(dest, k11[inds])
+
+    # integer
+    nodereduced_index = mf6.get_var_index(
+        xmi.get_var_address("NODEREDUCED", flopy_dis.model_name, "DIS")
+    )
+    nodereduced = mf6.get_value(nodereduced_index)
+    inds = np.array([1, 0], dtype=np.int32)
+    dest_int = np.zeros(inds.size, dtype=np.int32)
+    mf6.get_value_at_indices(nodereduced_index, dest_int, inds)
+    np.testing.assert_array_equal(dest_int, nodereduced[inds])
+
+    # an index past the end, and a destination of the wrong type
+    with pytest.raises(XMIError):
+        mf6.get_value_at_indices(k11_index, dest[:1], np.array([k11.size]))
+    with pytest.raises(InputError):
+        mf6.get_value_at_indices(k11_index, dest_int, np.array([0]))
 
 
 def test_set_value(flopy_dis_mf6):
@@ -395,12 +437,20 @@ def test_set_value(flopy_dis_mf6):
 
 
 def test_set_value_at_indices(flopy_dis_mf6):
-    """Expects to be implemented as soon as `set_value_at_indices` is implemented"""
-    mf6 = flopy_dis_mf6[1]
-    mf6.initialize()
+    flopy_dis, mf6 = flopy_dis_mf6
+    mf6.initialize(requested_extensions=["xmi"])
+    xmi = mf6.get_extension("xmi")
 
-    with pytest.raises(NotImplementedError):
-        mf6.set_value_at_indices(0, np.zeros((1, 1)), np.zeros((1, 1)))
+    head_index = mf6.get_var_index(xmi.get_var_address("X", flopy_dis.model_name))
+    expected = mf6.get_value(head_index)
+    inds = np.array([0, expected.size - 1], dtype=np.int32)
+    src = np.array([-1.0, -2.0])
+    expected[inds] = src
+    mf6.set_value_at_indices(head_index, inds, src)
+    np.testing.assert_array_equal(mf6.get_value(head_index), expected)
+
+    with pytest.raises(XMIError):
+        mf6.set_value_at_indices(head_index, np.array([-1]), src[:1])
 
 
 def test_get_grid_rank(flopy_dis_mf6):

@@ -374,7 +374,14 @@ class XmiWrapper(Bmi):
         return var_type.value.decode()
 
     def get_var_units(self, index: int) -> str:
-        raise NotImplementedError
+        len_units = self.get_constant_int("BMI_LENUNITS")
+        units = create_string_buffer(len_units)
+        self._execute_function(
+            self.lib.get_var_units,
+            byref(c_int(index)),
+            byref(units),
+        )
+        return units.value.decode()
 
     def get_var_itemsize(self, index: int) -> int:
         item_size = c_int(0)
@@ -395,10 +402,20 @@ class XmiWrapper(Bmi):
         return nbytes.value
 
     def get_var_location(self, index: int) -> str:
-        raise NotImplementedError
+        len_location = self.get_constant_int("BMI_LENVARLOCATION")
+        location = create_string_buffer(len_location)
+        self._execute_function(
+            self.lib.get_var_location,
+            byref(c_int(index)),
+            byref(location),
+        )
+        return location.value.decode()
 
     def get_time_units(self) -> str:
-        raise NotImplementedError
+        len_units = self.get_constant_int("BMI_LENUNITS")
+        units = create_string_buffer(len_units)
+        self._execute_function(self.lib.get_time_units, byref(units))
+        return units.value.decode()
 
     def get_value(
         self, index: int, dest: Union[NDArray[Any], None] = None
@@ -456,7 +473,21 @@ class XmiWrapper(Bmi):
     def get_value_at_indices(
         self, index: int, dest: NDArray[Any], inds: NDArray[np.int32]
     ) -> NDArray[Any]:
-        raise NotImplementedError
+        """Copy the values at zero-based, C-order indices into dest."""
+        c_inds = np.ascontiguousarray(inds, dtype=np.int32).ravel()
+        if not dest.flags["C"]:
+            raise InputError("Array should have C layout")
+        if dest.size < c_inds.size:
+            raise InputError("Array is smaller than the number of indices")
+        c_type = self._at_indices_type(index, dest)
+        self._execute_function(
+            self.lib.get_value_at_indices,
+            byref(c_int(index)),
+            byref(dest.ctypes.data_as(POINTER(c_type))),
+            c_inds.ctypes.data_as(POINTER(c_int)),
+            byref(c_int(c_inds.size)),
+        )
+        return dest
 
     def set_value(self, index: int, values: NDArray[Any]) -> None:
         if not values.flags["C"]:
@@ -485,7 +516,33 @@ class XmiWrapper(Bmi):
     def set_value_at_indices(
         self, index: int, inds: NDArray[Any], src: NDArray[Any]
     ) -> None:
-        raise NotImplementedError
+        """Set the values at zero-based, C-order indices from src."""
+        c_inds = np.ascontiguousarray(inds, dtype=np.int32).ravel()
+        if not src.flags["C"]:
+            raise InputError("Array should have C layout")
+        if src.size < c_inds.size:
+            raise InputError("Array is smaller than the number of indices")
+        c_type = self._at_indices_type(index, src)
+        self._execute_function(
+            self.lib.set_value_at_indices,
+            byref(c_int(index)),
+            c_inds.ctypes.data_as(POINTER(c_int)),
+            byref(c_int(c_inds.size)),
+            byref(src.ctypes.data_as(POINTER(c_type))),
+        )
+
+    def _at_indices_type(self, index: int, values: NDArray[Any]) -> Any:
+        """Return the C type for the variable, checking the array's dtype."""
+        var_type = self.get_var_type(index).lower()
+        if var_type.startswith("double"):
+            if values.dtype != np.float64:
+                raise InputError("Array should have float64 elements")
+            return c_double
+        if var_type.startswith("int"):
+            if values.dtype != np.int32:
+                raise InputError("Array should have int32 elements")
+            return c_int
+        raise InputError(f"Unsupported value type {var_type!r}")
 
     def get_grid_rank(self, grid: int) -> int:
         grid_rank = c_int(0)
